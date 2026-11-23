@@ -1,17 +1,10 @@
 SET DEFINE OFF
 WHENEVER SQLERROR EXIT FAILURE
 
--- 2019: recalcula guia em cancelamentos (inclusive cancelamento administrativo em massa)
-CREATE OR REPLACE TRIGGER TRG_NFSE_SITUACAO_GUIA
-AFTER UPDATE OF SITUACAO ON NFSE
-FOR EACH ROW
-DECLARE
-    PRAGMA AUTONOMOUS_TRANSACTION;
-BEGIN
-    PKG_GUIA.recalcular_guia(:NEW.PRESTADOR_ID, :NEW.COMPETENCIA);
-    COMMIT;
-END;
-/
+-- FIX CH-05: Remover gatilho que causava ORA-04091
+-- Problema: Gatilho AFTER UPDATE chamava PKG_GUIA.recalcular_guia() enquanto NFSE estava mutante
+-- Solução: Chamar recalcular_guia() explicitamente após UPDATE + COMMIT no código da aplicação
+-- Benefício adicional: Permite transações que cancelam múltiplas notas antes de recalcular guia
 
 SHOW ERRORS
 EXIT
