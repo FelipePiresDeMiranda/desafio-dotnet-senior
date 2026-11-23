@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using NotaCarioca.Servicos;
 using NotaCarioca.Servicos.Modelos;
+using NotaCarioca.Dados;
 using Oracle.ManagedDataAccess.Client;
 
 namespace NotaCarioca.Testes
@@ -26,15 +29,39 @@ namespace NotaCarioca.Testes
     /// - Suportar reprocessamento seguro de lotes com reenvios/duplicatas
     /// </summary>
     [TestClass]
-    public class ProcessadorLoteRpsTests
-    {
-        private ProcessadorLoteRps _processador;
+       public class ProcessadorLoteRpsTests
+       {
+           private ProcessadorLoteRps _processador;
 
-        [TestInitialize]
-        public void Setup()
-        {
-            _processador = new ProcessadorLoteRps();
-        }
+           [TestInitialize]
+           public void Setup()
+           {
+               _processador = new ProcessadorLoteRps();
+           }
+
+           [TestCleanup]
+           public void Cleanup()
+           {
+               // Limpar dados de teste do banco (se necessário)
+               LimparDadosTeste();
+           }
+
+           private void LimparDadosTeste()
+           {
+               // Limpar RPS criados durante testes
+               try
+               {
+                   using (var conn = OracleHelper.AbrirConexao())
+                   {
+                       string sql = "DELETE FROM RPS WHERE NUMERO BETWEEN 1001 AND 7999 AND SERIE IN ('A','B','C','D','E','F','G')";
+                       OracleHelper.ExecuteNonQuery(conn, null, sql);
+                   }
+               }
+               catch 
+               {
+                   // Ignorar erros de limpeza
+               }
+           }
 
         // ============================================================================
         // TESTES PARA DETECTAR RACE CONDITION EM LOTES CONCORRENTES
@@ -58,11 +85,11 @@ namespace NotaCarioca.Testes
         public void CH02_01_MesmoRpsSimultaneoDuasThreads_ApenasUmaDeveSuceder()
         {
             // Arrange
-            long prestadorId = 100001;
+            long prestadorId = 1408;
             string serie = "A";
             long numeroRps = 1001;
-            var rpsUm = CriarRpsLote(numeroRps, serie, "11111111000190", "Empresa Um");
-            var rpsDois = CriarRpsLote(numeroRps, serie, "22222222000180", "Empresa Dois");
+            var rpsUm = CriarRpsLote(numeroRps, serie, "11144477735", "Empresa Um");
+            var rpsDois = CriarRpsLote(numeroRps, serie, "11222333000181", "Empresa Dois");
 
             var resultados = new List<ResultadoRps>();
             var lockObj = new object();
@@ -75,7 +102,10 @@ namespace NotaCarioca.Testes
                     var resultado = ProcessarRpsDireto(prestadorId, rpsUm, "LOTE001");
                     lock (lockObj) resultados.Add(resultado);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Thread T1 exception: {ex.GetType().Name}: {ex.Message}");
+                }
             });
 
             Thread t2 = new Thread(() =>
@@ -85,7 +115,10 @@ namespace NotaCarioca.Testes
                     var resultado = ProcessarRpsDireto(prestadorId, rpsDois, "LOTE001");
                     lock (lockObj) resultados.Add(resultado);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Thread T2 exception: {ex.GetType().Name}: {ex.Message}");
+                }
             });
 
             t1.Start();
@@ -98,14 +131,16 @@ namespace NotaCarioca.Testes
 
             int sucessos = 0;
             int errosE060 = 0;
+            var mensagem = "";
             foreach (var r in resultados)
             {
+                mensagem += $"[Sucesso={r.Sucesso}, Codigo={r.Codigo}, Msg={r.Mensagem}] ";
                 if (r.Sucesso) sucessos++;
                 if (r.Codigo == "E060") errosE060++;
             }
 
-            Assert.AreEqual(1, sucessos, "Apenas UM RPS deve suceder (regra: um RPS só vira uma NFSE)");
-            Assert.AreEqual(1, errosE060, "Um deve retornar E060 (RPS já informado)");
+            Assert.AreEqual(1, sucessos, $"Apenas UM RPS deve suceder. Detalhes: {mensagem}");
+            Assert.AreEqual(1, errosE060, $"Um deve retornar E060. Detalhes: {mensagem}");
         }
 
         /// <summary>
@@ -126,10 +161,10 @@ namespace NotaCarioca.Testes
         public void CH02_02_LoteComRpsDuplicados_TodosRpsNaResposta()
         {
             // Arrange
-            long prestadorId = 100002;
-            var rps1 = CriarRpsLote(2001, "B", "33333333000160", "Cliente A");
-            var rps2 = CriarRpsLote(2002, "B", "44444444000150", "Cliente B");
-            var rps3 = CriarRpsLote(2001, "B", "55555555000140", "Cliente C"); // duplicado com rps1
+            long prestadorId = 1409;
+            var rps1 = CriarRpsLote(2001, "B", "11144477735", "Cliente A");
+            var rps2 = CriarRpsLote(2002, "B", "11222333000181", "Cliente B");
+            var rps3 = CriarRpsLote(2001, "B", "11144477735", "Cliente C"); // duplicado com rps1
 
             var resultados = new List<ResultadoRps>();
             var lockObj = new object();
@@ -142,7 +177,10 @@ namespace NotaCarioca.Testes
                     var r = ProcessarRpsDireto(prestadorId, rps1, "LOTE002");
                     lock (lockObj) resultados.Add(r);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"CH02_02 T1 Error: {ex.GetType().Name}: {ex.Message}");
+                }
             });
 
             Thread t2 = new Thread(() =>
@@ -152,7 +190,10 @@ namespace NotaCarioca.Testes
                     var r = ProcessarRpsDireto(prestadorId, rps2, "LOTE002");
                     lock (lockObj) resultados.Add(r);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"CH02_02 T2 Error: {ex.GetType().Name}: {ex.Message}");
+                }
             });
 
             Thread t3 = new Thread(() =>
@@ -162,7 +203,10 @@ namespace NotaCarioca.Testes
                     var r = ProcessarRpsDireto(prestadorId, rps3, "LOTE002");
                     lock (lockObj) resultados.Add(r);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"CH02_02 T3 Error: {ex.GetType().Name}: {ex.Message}");
+                }
             });
 
             t1.Start();
@@ -173,8 +217,9 @@ namespace NotaCarioca.Testes
             t3.Join();
 
             // Assert
+            var detalhes = string.Join("; ", resultados.Select(r => $"RPS={r.NumeroRps}, Cod={r.Codigo}, Msg={r.Mensagem}"));
             Assert.AreEqual(3, resultados.Count, 
-                "FALHA CH-02-02: Faltam RPS na resposta. Esperado 3, recebido " + resultados.Count);
+                $"FALHA CH-02-02: Faltam RPS na resposta. Esperado 3, recebido {resultados.Count}. Detalhes: {detalhes}");
 
             Assert.IsTrue(resultados.Exists(r => r.NumeroRps == 2001), "RPS 2001 deve estar em resultados");
             Assert.IsTrue(resultados.Exists(r => r.NumeroRps == 2002), "RPS 2002 deve estar em resultados");
@@ -201,9 +246,9 @@ namespace NotaCarioca.Testes
         public void CH02_03_NfsesConcorrentes_NumerosUnicos()
         {
             // Arrange
-            long prestadorId = 100003;
-            var rps1 = CriarRpsLote(3001, "C", "66666666000130", "Prestador 1");
-            var rps2 = CriarRpsLote(3002, "C", "77777777000120", "Prestador 2");
+            long prestadorId = 1410;
+            var rps1 = CriarRpsLote(3001, "C", "11144477735", "Prestador 1");
+            var rps2 = CriarRpsLote(3002, "C", "11222333000181", "Prestador 2");
 
             long nfseNum1 = 0, nfseNum2 = 0;
             var lockObj = new object();
@@ -276,7 +321,7 @@ namespace NotaCarioca.Testes
         public void CH02_04_LoteGrandeCom100RpsE2Duplicados_TodosNaResposta()
         {
             // Arrange
-            long prestadorId = 100004;
+            long prestadorId = 1411;
             var rpsList = new List<RpsLote>();
             var resultados = new List<ResultadoRps>();
             var lockObj = new object();
@@ -284,7 +329,7 @@ namespace NotaCarioca.Testes
             // Criar 100 RPS únicos
             for (int i = 4001; i < 4101; i++)
             {
-                rpsList.Add(CriarRpsLote(i, "D", $"{i:00000000000014}", $"Cliente {i}"));
+                rpsList.Add(CriarRpsLote(i, "D", "11144477735", $"Cliente {i}"));
             }
 
             // Adicionar 2 duplicatas (mesmo número, série)
@@ -294,12 +339,12 @@ namespace NotaCarioca.Testes
                 Serie = "D", 
                 Tipo = 1,
                 DataEmissao = DateTime.Now,
-                TomadorDocumento = "11111111000190",
+                TomadorDocumento = "11144477735",
                 TomadorRazaoSocial = "Duplicado 1",
                 ValorServicos = 1000m,
                 ValorDeducoes = 0m,
                 IssRetido = false,
-                ItemListaServico = "0101",
+                ItemListaServico = "01.01",
                 Discriminacao = "Serviço duplicado 1"
             });
 
@@ -309,12 +354,12 @@ namespace NotaCarioca.Testes
                 Serie = "D", 
                 Tipo = 1,
                 DataEmissao = DateTime.Now,
-                TomadorDocumento = "22222222000180",
+                TomadorDocumento = "11222333000181",
                 TomadorRazaoSocial = "Duplicado 2",
                 ValorServicos = 2000m,
                 ValorDeducoes = 0m,
                 IssRetido = false,
-                ItemListaServico = "0101",
+                ItemListaServico = "01.01",
                 Discriminacao = "Serviço duplicado 2"
             });
 
@@ -330,7 +375,10 @@ namespace NotaCarioca.Testes
                         var resultado = ProcessarRpsDireto(prestadorId, rpsList[idx], "LOTE004");
                         lock (lockObj) resultados.Add(resultado);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"CH02_04 Thread {idx} Error: {ex.GetType().Name}: {ex.Message}");
+                    }
                 });
                 threads[i].Start();
             }
@@ -377,8 +425,8 @@ namespace NotaCarioca.Testes
         public void CH02_05_ReenvioMesmoLote_TodosRpsRetornamE060()
         {
             // Arrange
-            long prestadorId = 100005;
-            var rps = CriarRpsLote(5001, "E", "88888888000110", "Cliente Reenvio");
+            long prestadorId = 1412;
+            var rps = CriarRpsLote(5001, "E", "11144477735", "Cliente Reenvio");
 
             var resultado1 = new List<ResultadoRps>();
             var resultado2 = new List<ResultadoRps>();
@@ -423,8 +471,8 @@ namespace NotaCarioca.Testes
         public void CH02_06_UmRpsSoViraUmaNfse_ApenasUmaNfseExiste()
         {
             // Arrange
-            long prestadorId = 100006;
-            var rps = CriarRpsLote(6001, "F", "99999999000100", "Cliente Único");
+            long prestadorId = 1413;
+            var rps = CriarRpsLote(6001, "F", "11222333000181", "Cliente Único");
 
             // Act - Processar RPS
             var resultado = ProcessarRpsDireto(prestadorId, rps, "LOTE006");
@@ -460,8 +508,8 @@ namespace NotaCarioca.Testes
         public void CH02_07_ExisteComSelectForUpdate_ApenasUmInsereRps()
         {
             // Arrange
-            long prestadorId = 100007;
-            var rps = CriarRpsLote(7001, "G", "11111111111111", "Cliente TX");
+            long prestadorId = 1414;
+            var rps = CriarRpsLote(7001, "G", "11144477735", "Cliente TX");
 
             int sucessos = 0;
             int fracassos = 0;
@@ -523,7 +571,7 @@ namespace NotaCarioca.Testes
                 ValorServicos = 1000m,
                 ValorDeducoes = 0m,
                 IssRetido = false,
-                ItemListaServico = "0101",
+                ItemListaServico = "01.01",
                 Discriminacao = "Serviço de teste"
             };
         }
@@ -533,17 +581,26 @@ namespace NotaCarioca.Testes
         /// </summary>
         private ResultadoRps ProcessarRpsDireto(long prestadorId, RpsLote rps, string protocolo)
         {
-            // Este método seria implementado no processador ou em um repositório mock
-            // Por enquanto, retorna estrutura para testes
-            var resultado = new ResultadoRps
+            try
             {
-                Indice = rps.Indice,
-                NumeroRps = rps.Numero,
-                Serie = rps.Serie,
-                Sucesso = true,
-                NfseNumero = rps.Numero
-            };
-            return resultado;
+                return _processador.ProcessarRpsPublico(prestadorId, rps, protocolo);
+            }
+            catch (Exception ex)
+            {
+                // Se falhar, retorna erro
+                Debug.WriteLine($"ERROR ProcessarRpsDireto: {ex.GetType().Name}: {ex.Message}");
+                Debug.WriteLine(ex.StackTrace);
+                var resultado = new ResultadoRps
+                {
+                    Indice = rps.Indice,
+                    NumeroRps = rps.Numero,
+                    Serie = rps.Serie,
+                    Sucesso = false,
+                    Codigo = "E999",
+                    Mensagem = ex.Message
+                };
+                return resultado;
+            }
         }
 
         /// <summary>
@@ -551,8 +608,34 @@ namespace NotaCarioca.Testes
         /// </summary>
         private DataTable ObterNfsesDoRps(long prestadorId, long rpsNumero, string rpsSerie)
         {
-            // Implementado via integração com NfseRepositorio
-            return new DataTable(); // Placeholder
+            DataTable dt = new DataTable();
+            try
+            {
+                using (OracleConnection conn = OracleHelper.AbrirConexao())
+                {
+                    string sql = @"
+                        SELECT n.ID, n.NUMERO, n.VALOR_SERVICOS, n.VALOR_ISS
+                        FROM NFSE n
+                        INNER JOIN RPS r ON n.RPS_ID = r.ID
+                        WHERE r.PRESTADOR_ID = :prestadorId
+                          AND r.NUMERO = :rpsNumero
+                          AND r.SERIE = :rpsSerie
+                        ORDER BY n.ID";
+
+                    OracleCommand cmd = new OracleCommand(sql, conn);
+                    cmd.Parameters.Add(":prestadorId", prestadorId);
+                    cmd.Parameters.Add(":rpsNumero", rpsNumero);
+                    cmd.Parameters.Add(":rpsSerie", rpsSerie);
+
+                    OracleDataAdapter adapter = new OracleDataAdapter(cmd);
+                    adapter.Fill(dt);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Erro ao obter NFSEs: {ex.Message}");
+            }
+            return dt;
         }
     }
 }
