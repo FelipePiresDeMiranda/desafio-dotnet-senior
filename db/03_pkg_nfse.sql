@@ -45,10 +45,12 @@ CREATE OR REPLACE PACKAGE BODY PKG_NFSE AS
         v_numero NUMBER;
     BEGIN
         -- numeracao sequencial por prestador, sem buracos (exigencia fiscal)
+        -- FOR UPDATE impede race condition quando multiplas sessoes geram NFSE em paralelo
         SELECT NVL(MAX(NUMERO), 0) + 1
           INTO v_numero
           FROM NFSE
-         WHERE PRESTADOR_ID = p_prestador_id;
+         WHERE PRESTADOR_ID = p_prestador_id
+         FOR UPDATE;
 
         o_nfse_id := SEQ_NFSE.NEXTVAL;
         o_numero := v_numero;

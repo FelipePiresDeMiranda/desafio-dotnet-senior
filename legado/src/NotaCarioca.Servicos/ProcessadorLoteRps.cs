@@ -13,6 +13,7 @@ namespace NotaCarioca.Servicos
     public class ProcessadorLoteRps
     {
         private static List<ResultadoRps> _resultados = new List<ResultadoRps>();
+        private static object _lockProcessarRps = new object();
 
         private LoteRepositorio _lotes = new LoteRepositorio();
         private RpsRepositorio _rps = new RpsRepositorio();
@@ -127,45 +128,70 @@ namespace NotaCarioca.Servicos
             if (rps.ValorServicos <= 0 || rps.ValorDeducoes < 0 || rps.ValorDeducoes > rps.ValorServicos)
                 return Erro(res, CodigosRetorno.E062);
 
-            try
+            lock (_lockProcessarRps)
             {
-                using (OracleTransaction tx = conn.BeginTransaction())
+                try
                 {
-                    if (!_rps.Existe(conn, tx, prestadorId, rps.Serie, rps.Numero))
+                    using (OracleTransaction tx = conn.BeginTransaction())
                     {
-                        long rpsId = _rps.Inserir(conn, tx, prestadorId, rps.Numero, rps.Serie, rps.Tipo, rps.DataEmissao,
-                                                  protocolo, rps.TomadorDocumento, rps.TomadorRazaoSocial);
+                        if (!_rps.Existe(conn, tx, prestadorId, rps.Serie, rps.Numero))
+                        {
+                            long rpsId = _rps.Inserir(conn, tx, prestadorId, rps.Numero, rps.Serie, rps.Tipo, rps.DataEmissao,
+                                                      protocolo, rps.TomadorDocumento, rps.TomadorRazaoSocial);
 
-                        decimal aliquota = CalculoIss.AliquotaEfetiva(itens[rps.ItemListaServico], regime);
-                        decimal baseCalculo = CalculoIss.CalcularBase(rps.ValorServicos, rps.ValorDeducoes);
-                        decimal valorIss = CalculoIss.CalcularValorIss(baseCalculo, aliquota, regime);
+                            decimal aliquota = CalculoIss.AliquotaEfetiva(itens[rps.ItemListaServico], regime);
+                            decimal baseCalculo = CalculoIss.CalcularBase(rps.ValorServicos, rps.ValorDeducoes);
+                            decimal valorIss = CalculoIss.CalcularValorIss(baseCalculo, aliquota, regime);
 
-                        long nfseId;
-                        long numero;
-                        string codigo;
-                        _nfse.GerarNfse(conn, tx, rpsId, prestadorId, Competencia.PrimeiroDia(rps.DataEmissao),
-                                        rps.ItemListaServico, rps.Discriminacao, rps.ValorServicos, rps.ValorDeducoes,
-                                        aliquota, valorIss, rps.IssRetido, rps.TomadorDocumento, rps.TomadorRazaoSocial,
-                                        out nfseId, out numero, out codigo);
-                        tx.Commit();
+                            long nfseId;
+                            long numero;
+                            string codigo;
+                            _nfse.GerarNfse(conn, tx, rpsId, prestadorId, Competencia.PrimeiroDia(rps.DataEmissao),
+                                            rps.ItemListaServico, rps.Discriminacao, rps.ValorServicos, rps.ValorDeducoes,
+                                            aliquota, valorIss, rps.IssRetido, rps.TomadorDocumento, rps.TomadorRazaoSocial,
+                                            out nfseId, out numero, out codigo);
+                            tx.Commit();
 
-                        res.Sucesso = true;
-                        res.NfseNumero = numero;
+                            res.Sucesso = true;
+                            res.NfseNumero = numero;
+                        }
+                        else
+                        {
+                            tx.Rollback();
+                            return Erro(res, CodigosRetorno.E060);
+                        }
+                    }
+                }
+                catch (OracleException ex)
+                {
+                    if (ex.Number == 1)
+                    {
+                        return Erro(res, CodigosRetorno.E060);
                     }
                     else
                     {
-                        tx.Rollback();
-                        return Erro(res, CodigosRetorno.E060);
+                        res.Sucesso = false;
+                        res.Codigo = CodigosRetorno.E999;
+                        res.Mensagem = ex.Message;
                     }
                 }
             }
-            catch (OracleException ex)
-            {
-                res.Sucesso = false;
-                res.Codigo = CodigosRetorno.E999;
-                res.Mensagem = ex.Message;
-            }
             return res;
+        }
+
+        // Método público para testes
+        public ResultadoRps ProcessarRpsPublico(long prestadorId, RpsLote rps, string protocolo, string regime = "RPS")
+        {
+            var itens = new Dictionary<string, decimal>();
+            foreach (DataRow r in _contribuintes.ListarItensServico().Rows)
+            {
+                itens[Convert.ToString(r["CODIGO"])] = Convert.ToDecimal(r["ALIQUOTA"]);
+            }
+
+            using (OracleConnection conn = OracleHelper.AbrirConexao())
+            {
+                return ProcessarRps(conn, rps, prestadorId, regime, protocolo, itens);
+            }
         }
 
         private static ResultadoRps NovoResultado(RpsLote rps)

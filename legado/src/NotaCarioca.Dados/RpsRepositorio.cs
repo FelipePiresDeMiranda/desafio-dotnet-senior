@@ -9,12 +9,12 @@ namespace NotaCarioca.Dados
     {
         public bool Existe(OracleConnection conn, OracleTransaction tx, long prestadorId, string serie, long numero)
         {
-            string sql = "SELECT COUNT(*) FROM RPS WHERE PRESTADOR_ID = :prest AND SERIE = :serie AND NUMERO = :num";
+            string sql = "SELECT ID FROM RPS WHERE PRESTADOR_ID = :prest AND SERIE = :serie AND NUMERO = :num FOR UPDATE";
             object o = OracleHelper.ExecuteScalar(conn, tx, sql,
                 OracleHelper.P("prest", prestadorId),
                 OracleHelper.P("serie", serie),
                 OracleHelper.P("num", numero));
-            return Convert.ToInt32(o) > 0;
+            return o != null && o != DBNull.Value;
         }
 
         public long Inserir(OracleConnection conn, OracleTransaction tx, long prestadorId, long numero, string serie, int tipo,
