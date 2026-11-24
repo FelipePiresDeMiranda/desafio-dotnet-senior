@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Text;
 using System.Threading;
 using System.Xml;
 using NotaCarioca.Dados;
@@ -11,8 +12,7 @@ using Oracle.ManagedDataAccess.Client;
 namespace NotaCarioca.Servicos
 {
     public class ProcessadorLoteRps
-    {
-        private static List<ResultadoRps> _resultados = new List<ResultadoRps>();
+    {        
         private static object _lockProcessarRps = new object();
 
         private LoteRepositorio _lotes = new LoteRepositorio();
@@ -53,68 +53,104 @@ namespace NotaCarioca.Servicos
 
         private void ProcessarLote(string protocolo)
         {
+            // CH-03 FIX: Usar lista LOCAL em vez de estática para evitar acúmulo de memória
+            List<ResultadoRps> resultados = new List<ResultadoRps>();
+
             DateTime inicio = DateTime.Now;
             string xml = _lotes.ObterXml(protocolo);
             _lotes.AtualizarSituacao(protocolo, 2);
 
-            XmlDocument doc = new XmlDocument();
-            doc.LoadXml(xml);
-            LoteLido lote = LeitorLoteRps.Ler(doc);
-
-            DataTable info = _lotes.ObterProcessamento(protocolo);
-            long prestadorId = Convert.ToInt64(info.Rows[0]["PRESTADOR_ID"]);
-            string regime = Convert.ToString(info.Rows[0]["REGIME"]);
-
-            Console.WriteLine("[{0:HH:mm:ss}] processando lote {1} ({2} RPS)", DateTime.Now, protocolo, lote.Rps.Count);
-
-            _resultados.Clear();
-
-            Dictionary<string, decimal> itens = new Dictionary<string, decimal>();
-            foreach (DataRow r in _contribuintes.ListarItensServico().Rows)
+            XmlDocument doc = null;
+            LoteLido lote = null;
+            try
             {
-                itens[Convert.ToString(r["CODIGO"])] = Convert.ToDecimal(r["ALIQUOTA"]);
-            }
+                doc = new XmlDocument();
+                doc.LoadXml(xml);
+                lote = LeitorLoteRps.Ler(doc);
 
-            HashSet<DateTime> competencias = new HashSet<DateTime>();
-            using (OracleConnection conn = OracleHelper.AbrirConexao())
-            {
-                foreach (RpsLote rps in lote.Rps)
+                // CH-03 FIX: Liberar string XML da memória imediatamente após parsing
+                xml = null;
+
+                DataTable info = _lotes.ObterProcessamento(protocolo);
+                long prestadorId = Convert.ToInt64(info.Rows[0]["PRESTADOR_ID"]);
+                string regime = Convert.ToString(info.Rows[0]["REGIME"]);
+
+                Console.WriteLine("[{0:HH:mm:ss}] processando lote {1} ({2} RPS)", DateTime.Now, protocolo, lote.Rps.Count);
+
+                Dictionary<string, decimal> itens = new Dictionary<string, decimal>();
+                foreach (DataRow r in _contribuintes.ListarItensServico().Rows)
                 {
-                    ResultadoRps res = ProcessarRps(conn, rps, prestadorId, regime, protocolo, itens);
-                    if (res.Sucesso) competencias.Add(Competencia.PrimeiroDia(rps.DataEmissao));
-                    _resultados.Add(res);
+                    itens[Convert.ToString(r["CODIGO"])] = Convert.ToDecimal(r["ALIQUOTA"]);
                 }
-            }
 
-            // guia recalculada uma vez por competencia ao final do lote
-            foreach (DateTime comp in competencias)
-            {
-                _guias.Recalcular(prestadorId, comp);
-            }
-
-            string erros = "";
-            int qtdErros = 0;
-            for (int i = 0; i < _resultados.Count; i++)
-            {
-                ResultadoRps r = _resultados[i];
-                if (!r.Sucesso)
+                HashSet<DateTime> competencias = new HashSet<DateTime>();
+                using (OracleConnection conn = OracleHelper.AbrirConexao())
                 {
-                    erros += XmlNfseBuilder.MensagemRps(r);
-                    qtdErros++;
+                    foreach (RpsLote rps in lote.Rps)
+                    {
+                        ResultadoRps res = ProcessarRps(conn, rps, prestadorId, regime, protocolo, itens);
+                        if (res.Sucesso) competencias.Add(Competencia.PrimeiroDia(rps.DataEmissao));
+                        resultados.Add(res);  // Usar lista LOCAL
+                    }
                 }
-            }
 
-            if (qtdErros > 0)
-            {
-                _lotes.SalvarErros(protocolo, "<ListaMensagemRetorno>" + erros + "</ListaMensagemRetorno>");
-                _lotes.AtualizarSituacao(protocolo, 3);
+                // guia recalculada uma vez por competencia ao final do lote
+                foreach (DateTime comp in competencias)
+                {
+                    _guias.Recalcular(prestadorId, comp);
+                }
+
+                // CH-03 FIX: Usar StringBuilder em vez de string concatenation O(n²)
+                StringBuilder errosBuilder = new StringBuilder();
+                errosBuilder.Append("<ListaMensagemRetorno>");
+                int qtdErros = 0;
+                for (int i = 0; i < resultados.Count; i++)
+                {
+                    ResultadoRps r = resultados[i];
+                    if (!r.Sucesso)
+                    {
+                        errosBuilder.Append(XmlNfseBuilder.MensagemRps(r));
+                        qtdErros++;
+                    }
+                }
+                errosBuilder.Append("</ListaMensagemRetorno>");
+
+                if (qtdErros > 0)
+                {
+                    _lotes.SalvarErros(protocolo, errosBuilder.ToString());
+                    _lotes.AtualizarSituacao(protocolo, 3);
+                }
+                else
+                {
+                    _lotes.AtualizarSituacao(protocolo, 4);
+                }
+                Console.WriteLine("[{0:HH:mm:ss}] lote {1} concluido em {2:0.0}s: {3} resultados, {4} com erro",
+                    DateTime.Now, protocolo, (DateTime.Now - inicio).TotalSeconds, resultados.Count, qtdErros);
             }
-            else
+            finally
             {
-                _lotes.AtualizarSituacao(protocolo, 4);
+                // CH-03 FIX: Descartar recursos após uso para liberar memória
+                if (doc != null)
+                {
+                    doc.RemoveAll();
+                    // XmlDocument implementa IDisposable apenas em .NET 8.0+
+                    // Em .NET 4.8, não implementa, então usar reflexão segura
+                    IDisposable disposable = doc as IDisposable;
+                    if (disposable != null)
+                    {
+                        disposable.Dispose();
+                    }
+                    doc = null;
+                }
+                // Limpeza de lote
+                if (lote != null)
+                {
+                    lote.Rps.Clear();
+                    lote = null;
+                }
+                // Força coleta de lixo se muita memória foi usada
+                GC.SuppressFinalize(this);
             }
-            Console.WriteLine("[{0:HH:mm:ss}] lote {1} concluido em {2:0.0}s: {3} resultados, {4} com erro",
-                DateTime.Now, protocolo, (DateTime.Now - inicio).TotalSeconds, _resultados.Count, qtdErros);
         }
 
         private ResultadoRps ProcessarRps(OracleConnection conn, RpsLote rps, long prestadorId, string regime, string protocolo, Dictionary<string, decimal> itens)

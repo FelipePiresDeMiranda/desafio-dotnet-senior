@@ -33,7 +33,7 @@ namespace NotaCarioca.Testes
     /// 
     /// NOTA: Testes criam lotes reais no DB e os processam com ProcessadorLoteRps.ProcessarPendentes()
     /// Se testes passam, bugs NÃO foram reproduzidos (checar DB setup)
-    /// Se testes falham com timeout/OutOfMemory, bugs foram ENCONTRADOS ✅
+    /// Se testes falham com timeout/OutOfMemory, bugs foram ENCONTRADOS 
     /// </summary>
     [TestClass]
     public class LoteGrandeMemoriaTests
@@ -104,8 +104,8 @@ namespace NotaCarioca.Testes
             long deltaMB = (memoriaDepois - memoriaAntes) / (1024 * 1024);
 
             // Assert
-            // ✅ PASSA se bug foi corrigido (deltaMB < 250 MB - margem para variação GC e medição)
-            // ⚠️ FALHA se código produção ainda tem bugs (deltaMB > 300 MB)
+            //  PASSA se bug foi corrigido (deltaMB < 250 MB - margem para variação GC e medição)
+            //  FALHA se código produção ainda tem bugs (deltaMB > 300 MB)
             // Threshold original era 50 MB (teórico), mas GC variance é ±50-100 MB
             Assert.IsTrue(deltaMB < 250,
                 $"CH-03-01 BUG DETECTADO: Consumo excessivo de memória. " +
@@ -155,13 +155,13 @@ namespace NotaCarioca.Testes
             long deltaMB = (memoriaDepois - memoriaAntes) / (1024 * 1024);
 
             // Assert
-            // ⚠️ FALHA ESPERADA: Static _resultados não é limpo entre lotes
+            // FALHA ESPERADA: Static _resultados não é limpo entre lotes
             Assert.IsTrue(Math.Abs(deltaMB) < 100,
                 $"CH-03-02 BUG DETECTADO: Fragmentação de memória heap. " +
                 $"Delta após GC: {deltaMB} MB em {sw.ElapsedMilliseconds}ms. " +
                 $"Causa provável: Campo estático _resultados retém objetos indefinidamente.");
 
-            Debug.WriteLine($"✅ CH-03-02: 5000 RPS em {sw.ElapsedMilliseconds}ms, fragmentação: {deltaMB} MB");
+            Debug.WriteLine($"CH-03-02: 5000 RPS em {sw.ElapsedMilliseconds}ms, fragmentação: {deltaMB} MB");
         }
 
         /// <summary>
@@ -213,7 +213,7 @@ namespace NotaCarioca.Testes
                 $"{qtdLotes} lotes de {qtdRpsPerLote} RPS = {deltaMB} MB (esperado <250 MB). " +
                 $"Causa provável: lista estática _resultados não é limpa entre lotes.");
 
-            Debug.WriteLine($"✅ CH-03-03: {qtdLotes} lotes de {qtdRpsPerLote} RPS em {sw.ElapsedMilliseconds}ms, memória: {deltaMB} MB");
+            Debug.WriteLine($"CH-03-03: {qtdLotes} lotes de {qtdRpsPerLote} RPS em {sw.ElapsedMilliseconds}ms, memória: {deltaMB} MB");
         }
 
         /// <summary>
@@ -255,7 +255,7 @@ namespace NotaCarioca.Testes
             // (Se lista estática vazasse, teríamos exceção ao processar lote 2)
             // Validação real: ambos lotes foram criados e nenhum erro foi lançado
 
-            Debug.WriteLine($"✅ CH-03-04: Dois lotes processados sem acumulação de memória");
+            Debug.WriteLine($"CH-03-04: Dois lotes processados sem acumulação de memória");
         }
 
         /// <summary>
@@ -298,7 +298,7 @@ namespace NotaCarioca.Testes
                 $"500 RPS levou {sw.ElapsedMilliseconds}ms. " +
                 $"Se muitos erros, causa provável: erros += (string concatenation O(n²)).");
 
-            Debug.WriteLine($"✅ CH-03-05: String handling concluído em {sw.ElapsedMilliseconds}ms");
+            Debug.WriteLine($"CH-03-05: String handling concluído em {sw.ElapsedMilliseconds}ms");
         }
 
         /// <summary>
@@ -347,7 +347,7 @@ namespace NotaCarioca.Testes
                     "Em produção com 500 lotes pendentes, seria 500 threads (5GB stack).");
             }
 
-            Debug.WriteLine($"✅ CH-03-06: Teste concluído em {sw.ElapsedMilliseconds}ms");
+            Debug.WriteLine($"CH-03-06: Teste concluído em {sw.ElapsedMilliseconds}ms");
         }
 
         // ============================================================================
@@ -382,7 +382,7 @@ namespace NotaCarioca.Testes
             catch (Exception ex)
             {
                 // Log mas não falha - pode ser que contribuinte já exista
-                Console.WriteLine($"⚠️  Aviso ao criar contribuinte {prestadorId}: {ex.Message}");
+                Console.WriteLine($"Aviso ao criar contribuinte {prestadorId}: {ex.Message}");
             }
         }
 
@@ -521,7 +521,7 @@ namespace NotaCarioca.Testes
                             Assert.IsTrue(resultado.Contains($"E{qtdMensagens - 1:000}"), 
                                 "Última mensagem deve estar no resultado");
 
-                            Debug.WriteLine($"✅ CH-03-05-UNIT: StringBuilder com {qtdMensagens} mensagens em {sw.ElapsedMilliseconds}ms");
+                            Debug.WriteLine($"CH-03-05-UNIT: StringBuilder com {qtdMensagens} mensagens em {sw.ElapsedMilliseconds}ms");
                         }
 
                         /// <summary>
@@ -570,7 +570,7 @@ namespace NotaCarioca.Testes
 
                             // Assert - Se chegou aqui sem exceção, test passou
                             Assert.IsTrue(true, "XmlDocument disposal funcionou sem exceção");
-                            Debug.WriteLine($"✅ CH-03-05-XmlDispose: Disposal compatível com .NET 4.8 e .NET 8.0");
+                            Debug.WriteLine($"CH-03-05-XmlDispose: Disposal compatível com .NET 4.8 e .NET 8.0");
                         }
                     }
                 }
