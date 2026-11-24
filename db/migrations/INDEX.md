@@ -34,10 +34,33 @@ Este arquivo documenta todas as migrations versionadas para aplicação em produ
 
 | # | Script | Status | Data | Descrição |
 |---|--------|--------|------|-----------|
-| 001 | `CH-01-001-FIX-GUIA-VALOR-ISS-ARREDONDAMENTO.sql` | 🆕 Novo | 2026-11-24 | Corrigir cálculo de ISS para usar valores já emitidos em notas |
-| 002 | `CH-01-002-ROLLBACK-GUIA-VALOR-ISS-ARREDONDAMENTO.sql` | 🆕 Novo | 2026-11-24 | Reverter correção (caso necessário) |
+| 001 | `CH-01-001-FIX-GUIA-VALOR-ISS-ARREDONDAMENTO.sql` | ✅ Aplicado | 2026-11-24 | Corrigir cálculo de ISS para usar valores já emitidos em notas |
+| 002 | `CH-01-002-ROLLBACK-GUIA-VALOR-ISS-ARREDONDAMENTO.sql` | ⏸️ Standby | 2026-11-24 | Reverter correção (caso necessário) |
 
 **Resumo**: Usar SUM(n.VALOR_ISS) em lugar de SUM(ROUND(...)) para eliminar divergência de arredondamento entre guia e soma de notas fiscais.
+
+---
+
+### 🚀 FEATURE: Suporte a CNPJ e CPF Alfanuméricos (IN RFB nº 2.229/2024)
+
+| # | Script | Status | Data | Descrição |
+|---|--------|--------|------|-----------|
+| 001 | `FEATURE-CNPJ-ALFANUMERICO-001-ALTER-SCHEMA.sql` | ✅ Aplicado | 2026-11-24 | Adicionar colunas TIPO (CONTRIBUINTES) e TOMADOR_DOCUMENTO_ALFANUMERICO (RPS) |
+| 002 | `FEATURE-CNPJ-ALFANUMERICO-001-ROLLBACK.sql` | ⏸️ Standby | 2026-11-24 | Reverter alterações de schema (caso necessário) |
+
+**Resumo**: Implementar suporte a CNPJ alfanuméricos com 3 passos:
+1. Adicionar coluna TIPO em CONTRIBUINTES (NUMBER(1) DEFAULT 1)
+2. Adicionar coluna TOMADOR_DOCUMENTO_ALFANUMERICO em RPS (VARCHAR2(14))
+3. Criar índice IX_NFSE_TOMADOR_ALFANUMERICO para otimizar consultas
+
+**Alterações aplicadas:**
+- ✅ CONTRIBUINTES.TIPO criada (NUMBER(1) com default 1)
+- ✅ RPS.TOMADOR_DOCUMENTO_ALFANUMERICO criada (VARCHAR2(14))
+- ✅ RPS.DT_MIGRACAO_ALFANUMERICO criada (DATE)
+- ✅ Dados migrados de TOMADOR_CNPJ/TOMADOR_CPF para TOMADOR_DOCUMENTO_ALFANUMERICO
+- ✅ Índice IX_NFSE_TOMADOR_ALFANUMERICO criado
+
+**Compatibilidade:** 100% regressiva (números continuam funcionando)
 
 ---
 
