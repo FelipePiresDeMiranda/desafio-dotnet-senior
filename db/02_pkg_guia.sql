@@ -16,7 +16,7 @@ CREATE OR REPLACE PACKAGE BODY PKG_GUIA AS
         MERGE INTO GUIAS g
         USING (SELECT p_prestador_id AS PRESTADOR_ID,
                       p_competencia  AS COMPETENCIA,
-                      NVL(SUM(ROUND((n.VALOR_SERVICOS - n.VALOR_DEDUCOES) * n.ALIQUOTA, 2)), 0) AS VALOR
+                      NVL(SUM(n.VALOR_ISS), 0) AS VALOR
                  FROM NFSE n
                 WHERE n.PRESTADOR_ID = p_prestador_id
                   AND n.COMPETENCIA  = p_competencia
